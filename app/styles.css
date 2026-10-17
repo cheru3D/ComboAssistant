@@ -151,6 +151,18 @@ details.others summary { color: var(--muted); padding: 8px 0; }
 .sheet img.card-img { width: 100%; max-width: 300px; display: block; margin: 0 auto 12px; border-radius: 4.75% / 3.5%; }
 .sheet .det { font-size: 14px; margin: 6px 0; padding-left: 10px; border-left: 3px solid var(--accent); }
 .sheet .det.warn { border-color: var(--warn); }
+.sheet .det { margin: 10px 0; }
+.sheet .det.off { border-color: var(--border); color: var(--muted); }
+.det-raw { color: var(--muted); font-size: 13px; margin-top: 3px; }
+.det-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+textarea {
+  width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px;
+  font: inherit; color: inherit; resize: vertical;
+}
+details.empty-steps { margin: 2px 0 8px; }
+details.empty-steps summary { color: var(--muted); font-size: 14px; padding: 6px 0; }
+details.empty-steps .step-name { font-size: 15px; margin-top: 8px; }
+details.empty-steps .step-note { margin-bottom: 4px; }
 
 input[type=search], input[type=text], select {
   width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px;

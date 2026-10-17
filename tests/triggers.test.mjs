@@ -82,3 +82,32 @@ test("palabras con 'self' no se confunden con la propia carta", () => {
   assert.equal(t.self, true);
   assert.equal(parseCard(byName("Grim Haruspex")).triggers[0].self, false);
 });
+
+test("mazo Villain: Strucker solo con Villains, Iron Monger con connive", () => {
+  const strucker = perm("Baron Strucker, HYDRA Overlord");
+  const monger = perm("Iron Monger, Sadistic Tycoon");
+  const doom = perm("Doctor Doom, King of Latveria");
+  const board = [strucker, monger, doom];
+  // Entra un Villain tuyo -> Strucker
+  const villain = byName("Doctor Doom");
+  assert.deepEqual(eventTriggers(board, { type: "etb", actor: 0, types: ["creature"], typeLine: villain.t }).map((r) => r.name), ["Baron Strucker, HYDRA Overlord"]);
+  // Entra un Elfo -> nada
+  assert.deepEqual(eventTriggers(board, { type: "etb", actor: 0, types: ["creature"], typeLine: "Creature — Elf Druid" }), []);
+  // Conspira una criatura tuya -> Iron Monger
+  assert.deepEqual(eventTriggers(board, { type: "connive", actor: 0, types: ["creature"] }).map((r) => r.name), ["Iron Monger, Sadistic Tycoon"]);
+  // Doom: inicio del combate en tu turno
+  assert.deepEqual(phaseTriggers(board, "beginCombat", 0), ["Doctor Doom, King of Latveria"]);
+  assert.deepEqual(phaseTriggers(board, "beginCombat", 1), []);
+});
+
+test("disparo definido a mano", async () => {
+  const { customTrigger } = await import("../app/js/triggers.js");
+  const t = customTrigger({ kind: "event", event: "connive", who: "you", cardType: "creature", subtype: "Villain", zone: "battlefield", text: "+1/+1" }, "x#c1");
+  const p = { uid: 99, controller: 0 };
+  assert.equal(eventMatches(t, p, { type: "connive", actor: 0, types: ["creature"], typeLine: "Creature — Human Villain" }), true);
+  assert.equal(eventMatches(t, p, { type: "connive", actor: 0, types: ["creature"], typeLine: "Creature — Elf" }), false);
+  assert.equal(eventMatches(t, p, { type: "connive", actor: 1, types: ["creature"] }), false);
+  const ph = customTrigger({ kind: "phase", step: "end", whose: "opp", text: "x" }, "x#c2");
+  assert.equal(phaseMatches(ph, p, "end", 2), true);
+  assert.equal(phaseMatches(ph, p, "end", 0), false);
+});

@@ -1,12 +1,76 @@
 // Estado de la partida y cálculo de qué se dispara en cada momento.
-import { STEPS, parseCard, eventMatches, phaseMatches, multiplierFor, typesOf } from "./triggers.js";
+import { STEPS, parseCard, customTrigger, eventMatches, phaseMatches, multiplierFor, typesOf } from "./triggers.js";
 
 const KEY = "ca-game-v1";
+const OVERRIDES_KEY = "ca-overrides-v1";
 const parsedCache = new Map();
 
+// --- Disparos editados a mano ------------------------------------------------
+// Se guardan por nombre de carta y sirven para todas las partidas:
+// { [nombre]: { hidden: [idDetectado], custom: [{ id, spec, replaces? }] } }
+
+let overrides = {};
+try { overrides = JSON.parse(localStorage.getItem(OVERRIDES_KEY)) || {}; } catch { overrides = {}; }
+
+function saveOverrides() {
+  try { localStorage.setItem(OVERRIDES_KEY, JSON.stringify(overrides)); } catch { /* sin almacenamiento */ }
+}
+
+export function overridesFor(name) {
+  return overrides[name] || { hidden: [], custom: [] };
+}
+
+// Guarda un disparo propio. `replaces` es el id del disparo detectado (o línea ⚠) que sustituye.
+export function saveCustom(name, { id, spec, replaces }) {
+  const o = (overrides[name] ||= { hidden: [], custom: [] });
+  const newId = id || `${name}#c${Date.now()}`;
+  o.custom = o.custom.filter((c) => c.id !== newId);
+  o.custom.push({ id: newId, spec, replaces: replaces || null });
+  if (replaces && !o.hidden.includes(replaces)) o.hidden.push(replaces);
+  parsedCache.delete(name);
+  saveOverrides();
+}
+
+export function deleteCustom(name, id) {
+  const o = overridesFor(name);
+  const c = o.custom.find((x) => x.id === id);
+  o.custom = o.custom.filter((x) => x.id !== id);
+  if (c?.replaces) o.hidden = o.hidden.filter((h) => h !== c.replaces);
+  overrides[name] = o;
+  parsedCache.delete(name);
+  saveOverrides();
+}
+
+// Ignorar (o volver a usar) un disparo detectado.
+export function toggleHidden(name, id) {
+  const o = (overrides[name] ||= { hidden: [], custom: [] });
+  o.hidden = o.hidden.includes(id) ? o.hidden.filter((h) => h !== id) : [...o.hidden, id];
+  parsedCache.delete(name);
+  saveOverrides();
+}
+
+// Disparos de una carta: lo detectado + lo editado a mano.
 export function parsed(card) {
-  if (!parsedCache.has(card.n)) parsedCache.set(card.n, parseCard(card));
-  return parsedCache.get(card.n);
+  if (parsedCache.has(card.n)) return parsedCache.get(card.n);
+  const base = parseCard(card);
+  const o = overrides[card.n];
+  let result = base;
+  if (o) {
+    const replaced = new Set(o.custom.map((c) => c.replaces).filter(Boolean));
+    result = {
+      triggers: [
+        ...base.triggers.filter((t) => !o.hidden.includes(t.id)),
+        ...o.custom.map((c) => ({ ...customTrigger(c.spec, c.id), replaces: c.replaces })),
+      ],
+      modifiers: base.modifiers.filter((m) => !o.hidden.includes(m.id)),
+      unknown: base.unknown.filter((u) => !replaced.has(u.id) && !o.hidden.includes(u.id)),
+      hidden: [...new Map([...base.triggers, ...base.modifiers, ...base.unknown]
+        .filter((t) => o.hidden.includes(t.id) && !replaced.has(t.id))
+        .map((t) => [t.id, t])).values()],
+    };
+  }
+  parsedCache.set(card.n, result);
+  return result;
 }
 
 export function newGame({ opponents, names, starting }) {
@@ -169,9 +233,9 @@ export function movePerm(g, db, perm, to) {
   const reactions = [];
   if (from === "battlefield" && to !== "battlefield") {
     if (to === "graveyard" && types.includes("creature")) {
-      reactions.push(...triggersForEvent(g, db, { type: "dies", actor: perm.controller, types, sourceUid: perm.uid }));
+      reactions.push(...triggersForEvent(g, db, { type: "dies", actor: perm.controller, types, sourceUid: perm.uid, typeLine: card.t }));
     }
-    reactions.push(...triggersForEvent(g, db, { type: "leaves", actor: perm.controller, types, sourceUid: perm.uid }));
+    reactions.push(...triggersForEvent(g, db, { type: "leaves", actor: perm.controller, types, sourceUid: perm.uid, typeLine: card.t }));
   }
   if ((perm.qty || 1) > 1 && from === "battlefield") {
     perm.qty--;
@@ -187,5 +251,5 @@ export function movePerm(g, db, perm, to) {
 
 export function enterReactions(g, db, perm) {
   const types = typesOf(cardOf(perm, db));
-  return triggersForEvent(g, db, { type: "etb", actor: perm.controller, types, sourceUid: perm.uid, count: perm.qty || 1 });
+  return triggersForEvent(g, db, { type: "etb", actor: perm.controller, types, sourceUid: perm.uid, count: perm.qty || 1, typeLine: cardOf(perm, db).t });
 }

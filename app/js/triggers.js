@@ -34,6 +34,7 @@ export const EVENTS = {
   counters: "pone contadores",
   mana: "gira por maná",
   targeted: "es objetivo",
+  connive: "conspira (connive)",
   other: "otro",
 };
 
@@ -54,7 +55,7 @@ function normalize(line, name) {
   for (const n of [...names].sort((a, b) => b.length - a.length)) {
     if (n.length > 2) s = s.replace(new RegExp(`\\b${escapeRe(n)}\\b`, "g"), "~");
   }
-  s = s.replace(/\bthis (creature|artifact|enchantment|permanent|land|planeswalker|card|vehicle|equipment|aura|battle|saga|spacecraft)\b/gi, "~");
+  s = s.replace(/\bthis (creature|artifact|enchantment|permanent|land|planeswalker|card|vehicle|equipment|aura|battle|saga|spacecraft|siege|class|room|case|attraction|contraption)\b/gi, "~");
   // Palabra de habilidad: "Landfall — Whenever ..." -> "Whenever ..."
   s = s.replace(/^[A-Z][A-Za-z' ,-]{1,40} — (?=(When|Whenever|At)\b)/, "");
   return s;
@@ -113,6 +114,7 @@ function eventsFromCondition(c) {
   if (/counters? (is|are) put|put one or more .*counters?/.test(c)) ev.push("counters");
   if (/tapped for mana|tap .* for mana/.test(c)) ev.push("mana");
   if (/becomes the target/.test(c)) ev.push("targeted");
+  if (/\bconnives?\b/.test(c)) ev.push("connive");
   return ev.length ? ev : ["other"];
 }
 
@@ -120,6 +122,38 @@ function typesFromCondition(c) {
   const types = TYPE_WORDS.filter((t) => new RegExp(`\\b${t}s?\\b`).test(c) && !new RegExp(`\\bnon${t}`).test(c));
   const non = TYPE_WORDS.filter((t) => new RegExp(`\\bnon-?${t}`).test(c));
   return { types, non };
+}
+
+// Subtipos en mayúscula dentro de la condición: "another Villain you control enters" -> ["Villain"]
+function subtypesFromCondition(cond) {
+  const skip = new Set(["When", "Whenever", "At", "The", "You", "Your", "If", "Each", "Ring"]);
+  const words = (cond.match(/\b[A-Z][a-z]+\b/g) || []).filter((w) => !skip.has(w));
+  return [...new Set(words)];
+}
+
+function subtypeStem(w) {
+  return w.toLowerCase().replace(/ves$/, "f").replace(/s$/, "");
+}
+
+// Arma un disparo a partir de lo que el usuario define a mano en el editor.
+// spec: { kind: "phase"|"event", step, whose, event, who, cardType, subtype, zone, text }
+export function customTrigger(spec, id) {
+  const base = { id, raw: spec.text || "", effect: spec.text || "", zone: spec.zone || "battlefield", custom: true, spec };
+  if (spec.kind === "phase") return { ...base, kind: "phase", steps: [spec.step], whose: spec.whose || "you" };
+  const types = spec.cardType ? spec.cardType.split(",") : [];
+  return {
+    ...base,
+    kind: "event",
+    events: [spec.event],
+    self: spec.who === "self",
+    generic: spec.who !== "self",
+    who: spec.who === "self" ? "you" : spec.who,
+    attacksYou: false,
+    types,
+    non: [],
+    subtypes: spec.subtype ? [spec.subtype.trim()] : [],
+    condition: "",
+  };
 }
 
 // Analiza una carta y devuelve sus disparos y modificadores.
@@ -179,6 +213,7 @@ export function parseCard(card) {
         who: generic ? whoFromCondition(condL.replace(/~/g, "")) : "you",
         attacksYou: /attacks you\b|attack you\b/.test(condL),
         ...typesFromCondition(condL),
+        subtypes: subtypesFromCondition(cond.replace(/~/g, "")),
         condition: cond,
         effect: m[3],
       });
@@ -222,6 +257,10 @@ export function eventMatches(trig, perm, event) {
   if (trig.who === "you" && event.actor !== perm.controller) return false;
   if (trig.who === "opp" && event.actor === perm.controller) return false;
   if (trig.attacksYou && event.target != null && event.target !== perm.controller) return false;
+  if (trig.subtypes?.length && event.typeLine) {
+    const tl = event.typeLine.toLowerCase();
+    if (!trig.subtypes.some((w) => tl.includes(subtypeStem(w)))) return false;
+  }
   return typeMatches(trig, event.types);
 }
 

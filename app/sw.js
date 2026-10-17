@@ -1,6 +1,6 @@
 // Service worker: guarda la app y la base de cartas para usarla sin conexión.
 // Cambia VERSION cada vez que publiques una versión nueva.
-const VERSION = "ca-v3";
+const VERSION = "ca-v4";
 const IMAGES = "ca-img-v1";
 const SHELL = [
   "./",
@@ -17,7 +17,12 @@ const SHELL = [
 ];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: "reload" evita guardar copias viejas que el navegador tenga en su caché HTTP
+  e.waitUntil(
+    caches.open(VERSION)
+      .then((c) => c.addAll(SHELL.map((url) => new Request(url, { cache: "reload" }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (e) => {

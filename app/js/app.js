@@ -26,6 +26,8 @@ const EVENT_BUTTONS = [
   { type: "lifegain", label: "❤️ Ganó vida", verb: "ganó vida" },
   { type: "sacrifice", label: "🔥 Sacrificó algo", verb: "sacrificó algo" },
   { type: "discard", label: "🗑️ Descartó", verb: "descartó" },
+  { type: "connive", label: "🌀 Conspiró (connive)", types: ["creature"], verb: "hizo conspirar a una criatura" },
+  { type: "pick", label: "➕ Otro evento…" },
 ];
 
 // Botones de "Jugar" en las fases principales de tu turno.
@@ -114,6 +116,8 @@ function renderTrig(it, doneKey, { checkable = true } = {}) {
   if (it.times === 0) tags.push(`<span class="tag zero">anulado</span>`);
   else if (it.times !== 1) tags.push(`<span class="tag times">×${it.times}</span>`);
   if (it.cond) tags.push(`<span class="tag cond">${esc(it.cond)}</span>`);
+  if (/once each turn/i.test(it.trig.raw)) tags.push(`<span class="tag cond">1 vez por turno</span>`);
+  if (it.trig.custom) tags.push(`<span class="tag">✏️</span>`);
   const notes = it.notes?.length ? `<div class="text">${esc(it.notes.join(" · "))}</div>` : "";
   return `
     <div class="trig ${it.mine ? "" : "opp"} ${done ? "done" : ""}">
@@ -129,23 +133,31 @@ function renderTrig(it, doneKey, { checkable = true } = {}) {
 function renderTurn() {
   let html = "";
   if (g.active === 0) {
-    // Todo tu turno en una sola lista, fase por fase
-    let phase = null;
-    for (const step of STEPS) {
-      if (step.phase !== phase) {
-        phase = step.phase;
-        html += `<h2 class="phase-head">${esc(phase)}</h2>`;
+    // Todo tu turno en una sola lista, fase por fase.
+    // Los pasos sin disparos de cada fase quedan juntos en un desplegable.
+    const phases = [...new Set(STEPS.map((s) => s.phase))];
+    for (const phase of phases) {
+      const steps = STEPS.filter((s) => s.phase === phase);
+      let blocks = "";
+      const empty = [];
+      for (const step of steps) {
+        const items = G.triggersForStep(g, db, step.id, 0);
+        const isMain = ["main1", "main2"].includes(step.id);
+        if (!items.length && !isMain) { empty.push(step); continue; }
+        blocks += `<section class="step-block">
+          ${steps.length > 1 ? `<div class="step-name">${esc(step.es)} <small>${esc(step.en)}</small></div>` : ""}
+          ${STEP_NOTES[step.id] ? `<p class="step-note">${esc(STEP_NOTES[step.id])}</p>` : ""}
+          ${items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("")}
+          ${isMain ? renderPlay() : ""}
+        </section>`;
       }
-      const items = G.triggersForStep(g, db, step.id, 0);
-      const isMain = ["main1", "main2"].includes(step.id);
-      const single = STEPS.filter((s) => s.phase === step.phase).length === 1;
-      html += `<section class="step-block">
-        ${single ? "" : `<div class="step-name">${esc(step.es)} <small>${esc(step.en)}</small></div>`}
-        ${STEP_NOTES[step.id] ? `<p class="step-note">${esc(STEP_NOTES[step.id])}</p>` : ""}
-        ${items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("")}
-        ${!items.length && !STEP_NOTES[step.id] && !isMain ? `<p class="step-note">Nada se dispara</p>` : ""}
-        ${isMain ? renderPlay() : ""}
-      </section>`;
+      html += `<h2 class="phase-head">${esc(phase)}</h2>${blocks}`;
+      if (empty.length) {
+        html += `<details class="empty-steps"><summary>${empty.length === steps.length && steps.length > 1 ? "Ningún paso tiene disparos" : `Sin disparos: ${esc(empty.map((s) => s.es).join(", "))}`}</summary>
+          ${empty.map((s) => `<div class="step-name">${esc(s.es)} <small>${esc(s.en)}</small></div>
+            <p class="step-note">${esc(STEP_NOTES[s.id] || "Nada se dispara.")}</p>`).join("")}
+        </details>`;
+      }
     }
   } else {
     let mine = "", others = "", othersCount = 0;
@@ -242,18 +254,37 @@ function describeTrig(t) {
   const who = t.generic ? { you: "tú / lo tuyo", opp: "un oponente", any: "cualquiera" }[t.who] : "esta carta";
   const ev = t.events.map((e) => EVENTS[e]).join(", ");
   const zone = t.zone === "graveyard" ? " · desde el cementerio" : t.zone === "command" ? " · también en la zona de mando" : "";
-  return `⚡ Cuando ${who}${t.self && t.generic ? " (o esta carta)" : ""}: ${ev}${zone}`;
+  const only = [...(t.types || []).map((x) => TYPE_LABELS[x] || x), ...(t.subtypes || [])];
+  return `⚡ Cuando ${who}${t.self && t.generic ? " (o esta carta)" : ""}: ${ev}${only.length ? ` · solo ${only.join(", ")}` : ""}${zone}`;
+}
+
+const TYPE_LABELS = { creature: "criatura", artifact: "artefacto", enchantment: "encantamiento", land: "tierra", instant: "instantáneo", sorcery: "conjuro", planeswalker: "planeswalker", battle: "batalla" };
+
+function trigRow(uid, t, buttons, cls = "") {
+  return `<div class="det ${cls}">
+    <div>${esc(describeTrig(t))}${t.custom ? " ✏️" : ""}</div>
+    ${t.raw ? `<div class="det-raw">${esc(t.raw)}</div>` : ""}
+    <div class="det-actions">${buttons.map(([act, label]) => `<button class="btn small" data-act="${act}" data-uid="${uid}" data-id="${esc(t.id)}">${label}</button>`).join("")}</div>
+  </div>`;
 }
 
 function showDetail(uid) {
   const p = g.perms.find((x) => x.uid === uid);
   if (!p) return;
+  ui.sheet = { kind: "detail", uid };
   const card = G.cardOf(p, db);
   const parsed = G.parsed(card);
   const det = [
-    ...parsed.triggers.map((t) => `<div class="det">${esc(describeTrig(t))}</div>`),
+    ...parsed.triggers.filter((t) => t.kind !== "event" || t.events[0] !== "other").map((t) => trigRow(uid, t,
+      t.custom ? [["trig-edit", "✏️ Editar"], ["trig-delete", "🗑 Borrar"]] : [["trig-edit", "✏️ Editar"], ["trig-hide", "🚫 Ignorar"]])),
     ...parsed.modifiers.map((m) => `<div class="det">${m.kind === "double" ? "✖2 Duplica disparos" : "🚫 Anula disparos"} por: ${esc(EVENTS[m.event] || "cualquier evento")}</div>`),
-    ...parsed.unknown.map((u) => `<div class="det warn">⚠ Revisar a mano: ${esc(u.raw)}</div>`),
+    ...parsed.unknown.map((u) => `<div class="det warn">
+      <div>⚠ La app no entiende esta línea:</div><div class="det-raw">${esc(u.raw)}</div>
+      <div class="det-actions"><button class="btn small" data-act="trig-define" data-uid="${uid}" data-id="${esc(u.id)}">✏️ Definir disparo</button>
+      <button class="btn small" data-act="trig-hide" data-uid="${uid}" data-id="${esc(u.id)}">No es un disparo</button></div>
+    </div>`),
+    ...(parsed.hidden || []).map((t) => `<div class="det off"><div>Ignorado: ${esc(t.raw)}</div>
+      <div class="det-actions"><button class="btn small" data-act="trig-hide" data-uid="${uid}" data-id="${esc(t.id)}">↩ Volver a usar</button></div></div>`),
   ].join("");
   const actions = {
     battlefield: [
@@ -269,11 +300,77 @@ function showDetail(uid) {
     <h3>${esc(p.name)}</h3>
     <p class="sub">${esc(card.t)}${card.p ? ` · ${esc(card.p)}` : ""} · ${esc(playerName(p.controller))}</p>
     ${card.o ? `<div class="oracle">${esc(card.o)}</div>` : ""}
-    ${det ? `<h2>Lo que detecta la app</h2>${det}` : ""}
+    <h2>Disparos</h2>${det || `<p class="step-note">La app no encontró disparos en esta carta.</p>`}
+    <button class="btn small" data-act="trig-add" data-uid="${uid}">➕ Agregar disparo</button>
     ${p.zone === "battlefield" ? `<div class="row"><span style="align-self:center;color:var(--muted)">Copias: ${p.qty || 1}</span>
       <button class="btn small" data-act="qty" data-uid="${uid}" data-d="-1">−1</button>
       <button class="btn small" data-act="qty" data-uid="${uid}" data-d="1">+1</button></div>` : ""}
     <div class="row">${actions.map(([to, label]) => `<button class="btn small ${to === "graveyard" ? "danger" : ""}" data-act="move" data-uid="${uid}" data-to="${to}">${label}</button>`).join("")}</div>`);
+}
+
+// --- Editor de disparos ----------------------------------------------------------
+
+const CARD_TYPE_OPTIONS = [
+  ["", "Cualquiera"], ["creature", "Criatura"], ["artifact", "Artefacto"], ["enchantment", "Encantamiento"],
+  ["land", "Tierra"], ["instant,sorcery", "Instantáneo o conjuro"], ["planeswalker", "Planeswalker"],
+];
+
+function specFromTrig(t) {
+  if (t.spec) return { ...t.spec };
+  if (t.kind === "phase") return { kind: "phase", step: t.steps[0], whose: t.whose === "other" ? "each" : t.whose, zone: t.zone, text: t.raw };
+  return {
+    kind: "event",
+    event: t.events[0] === "other" ? "etb" : t.events[0],
+    who: t.self && !t.generic ? "self" : t.who,
+    cardType: (t.types || []).join(","),
+    subtype: (t.subtypes || [])[0] || "",
+    zone: t.zone,
+    text: t.raw,
+  };
+}
+
+const opts = (list, value) => list.map(([v, l]) => `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(l)}</option>`).join("");
+
+function showTrigForm(uid, { id = null, replaces = null, spec, title }) {
+  const p = g.perms.find((x) => x.uid === uid);
+  ui.sheet = { kind: "trigform", uid, id, replaces, spec };
+  const s = spec;
+  const phaseFields = `
+    <label class="field"><span>Paso</span><select id="f-step">${opts(STEPS.map((x) => [x.id, `${x.es} (${x.en})`]), s.step)}</select></label>
+    <label class="field"><span>¿En el turno de quién?</span><select id="f-whose">${opts([["you", "Mi turno"], ["opp", "Turno de cada oponente"], ["each", "Turno de cada jugador"]], s.whose)}</select></label>`;
+  const eventFields = `
+    <label class="field"><span>¿Qué pasa?</span><select id="f-event">${opts(Object.entries(EVENTS).filter(([k]) => k !== "other"), s.event)}</select></label>
+    <label class="field"><span>¿Quién o qué lo hace?</span><select id="f-who">${opts([["self", "Esta carta"], ["you", "Yo / algo mío"], ["opp", "Un oponente / algo suyo"], ["any", "Cualquiera"]], s.who)}</select></label>
+    <label class="field"><span>Tipo de carta</span><select id="f-ctype">${opts(CARD_TYPE_OPTIONS, s.cardType || "")}</select></label>
+    <label class="field"><span>Subtipo (opcional, en inglés: Villain, Elf, Zombie…)</span><input type="text" id="f-sub" value="${esc(s.subtype || "")}"></label>`;
+  openSheet(`<h3>${esc(title || (id ? "Editar disparo" : "Nuevo disparo"))}</h3>
+    <p class="sub">${esc(p.name)}</p>
+    <div class="seg">
+      <button class="${s.kind === "phase" ? "on" : ""}" data-act="trig-kind" data-k="phase">Al comienzo de un paso</button>
+      <button class="${s.kind === "event" ? "on" : ""}" data-act="trig-kind" data-k="event">Cuando pasa algo</button>
+    </div>
+    ${s.kind === "phase" ? phaseFields : eventFields}
+    <label class="field"><span>Funciona desde</span><select id="f-zone">${opts([["battlefield", "El campo de batalla"], ["graveyard", "El cementerio"], ["command", "La zona de mando (y el campo)"]], s.zone || "battlefield")}</select></label>
+    <label class="field"><span>Qué hace (recordatorio)</span><textarea id="f-text" rows="3">${esc(s.text || "")}</textarea></label>
+    <div class="row">
+      <button class="btn primary" style="flex:1" data-act="trig-save">Guardar</button>
+      <button class="btn" data-act="trig-cancel">Cancelar</button>
+    </div>
+    <p class="step-note">Se guarda para esta carta en todas tus partidas.</p>`);
+}
+
+function readTrigForm() {
+  const val = (id) => document.getElementById(id)?.value;
+  const s = { ...ui.sheet.spec, zone: val("f-zone"), text: val("f-text").trim() };
+  if (s.kind === "phase") Object.assign(s, { step: val("f-step"), whose: val("f-whose") });
+  else Object.assign(s, { event: val("f-event"), who: val("f-who"), cardType: val("f-ctype"), subtype: val("f-sub").trim() });
+  return s;
+}
+
+function findTrig(uid, id) {
+  const p = g.perms.find((x) => x.uid === uid);
+  const parsed = G.parsed(G.cardOf(p, db));
+  return [...parsed.triggers, ...parsed.unknown].find((t) => t.id === id);
 }
 
 function showAdd(player, mode = "card") {
@@ -320,7 +417,7 @@ function playCard(button, card) {
         reactions.push({ key: `cast-self:${trig.id}`, perm: ghost, trig, mine: true, owner: "Tú", times: 1, notes: [], cond: "Al lanzar" });
       }
     }
-    reactions.push(...G.triggersForEvent(g, db, { type: "cast", actor: 0, types }, { cond: "Al lanzar" }));
+    reactions.push(...G.triggersForEvent(g, db, { type: "cast", actor: 0, types, typeLine: card.t }, { cond: "Al lanzar" }));
   }
   if (types.some((t) => PERMANENT_TYPES.includes(t))) {
     const p = G.addPerm(g, card, 0, "battlefield");
@@ -335,8 +432,14 @@ function playCard(button, card) {
   showReactions(button.id === "land" ? `Jugaste ${card.n}` : `Lanzaste ${card.n}`, reactions);
 }
 
-function showEvent(i) {
-  const b = EVENT_BUTTONS[i];
+function showEvent(i, button = EVENT_BUTTONS[i]) {
+  const b = button;
+  if (b.type === "pick") {
+    ui.sheet = { kind: "event-pick" };
+    openSheet(`<h3>¿Qué pasó?</h3>
+      <div class="row">${Object.entries(EVENTS).filter(([k]) => k !== "other").map(([k, l]) => `<button class="chip" data-act="event-any" data-type="${k}">${esc(l)}</button>`).join("")}</div>`);
+    return;
+  }
   ui.sheet = { kind: "event", button: b };
   openSheet(`<h3>${b.label}</h3><p class="sub">¿Quién?</p>
     <div class="row">${g.players.map((_, p) => `<button class="chip" data-act="event-who" data-p="${p}">${esc(playerName(p))}</button>`).join("")}</div>`);
@@ -391,7 +494,7 @@ const actions = {
     const d = Number(el.dataset.d);
     if (d < 0 && (p.qty || 1) <= 1) return;
     p.qty = (p.qty || 1) + d;
-    const reactions = d > 0 ? G.triggersForEvent(g, db, { type: "etb", actor: p.controller, types: typesOf(G.cardOf(p, db)), sourceUid: p.uid }) : [];
+    const reactions = d > 0 ? G.triggersForEvent(g, db, { type: "etb", actor: p.controller, types: typesOf(G.cardOf(p, db)), sourceUid: p.uid, typeLine: G.cardOf(p, db).t }) : [];
     persist();
     if (reactions.length) { render(); showReactions(`Otra copia de ${p.name} entró`, reactions); }
     else { showDetail(p.uid); render(); }
@@ -403,7 +506,51 @@ const actions = {
     const label = { graveyard: "fue al cementerio", exile: "fue exiliada", gone: "salió", battlefield: "entró al campo", command: "volvió a la zona de mando" }[to];
     afterMove(reactions, `${p.name} ${label}`);
   },
+  "trig-edit": (el) => {
+    const uid = Number(el.dataset.uid);
+    const t = findTrig(uid, el.dataset.id);
+    // Editar uno detectado lo reemplaza; editar uno propio lo sobrescribe
+    showTrigForm(uid, t.custom ? { id: t.id, replaces: t.replaces, spec: specFromTrig(t) } : { replaces: t.id, spec: specFromTrig(t) });
+  },
+  "trig-define": (el) => {
+    const uid = Number(el.dataset.uid);
+    const u = findTrig(uid, el.dataset.id);
+    const kind = /^At the beginning/i.test(u.raw) ? "phase" : "event";
+    showTrigForm(uid, { replaces: u.id, title: "Definir disparo", spec: { kind, step: "upkeep", whose: "you", event: "etb", who: "you", cardType: "", subtype: "", zone: "battlefield", text: u.raw } });
+  },
+  "trig-add": (el) => showTrigForm(Number(el.dataset.uid), { spec: { kind: "event", step: "upkeep", whose: "you", event: "etb", who: "you", cardType: "", subtype: "", zone: "battlefield", text: "" } }),
+  "trig-kind": (el) => {
+    const s = readTrigForm();
+    s.kind = el.dataset.k;
+    const { uid, id, replaces } = ui.sheet;
+    showTrigForm(uid, { id, replaces, spec: s });
+  },
+  "trig-save": () => {
+    const { uid, id, replaces } = ui.sheet;
+    const p = g.perms.find((x) => x.uid === uid);
+    G.saveCustom(p.name, { id, replaces, spec: readTrigForm() });
+    showDetail(uid);
+    render();
+    toast("Disparo guardado");
+  },
+  "trig-cancel": () => showDetail(ui.sheet.uid),
+  "trig-delete": (el) => {
+    const uid = Number(el.dataset.uid);
+    G.deleteCustom(g.perms.find((x) => x.uid === uid).name, el.dataset.id);
+    showDetail(uid);
+    render();
+  },
+  "trig-hide": (el) => {
+    const uid = Number(el.dataset.uid);
+    G.toggleHidden(g.perms.find((x) => x.uid === uid).name, el.dataset.id);
+    showDetail(uid);
+    render();
+  },
   event: (el) => showEvent(Number(el.dataset.i)),
+  "event-any": (el) => {
+    const type = el.dataset.type;
+    showEvent(-1, { type, label: EVENTS[type][0].toUpperCase() + EVENTS[type].slice(1), verb: `— ${EVENTS[type]}` });
+  },
   play: (el) => { if (!el.disabled) showPlay(el.dataset.id); },
   "event-who": (el) => {
     const b = ui.sheet.button;

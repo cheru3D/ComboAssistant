@@ -129,14 +129,24 @@ function renderTrig(it, doneKey, { checkable = true } = {}) {
 function renderTurn() {
   let html = "";
   if (g.active === 0) {
-    const step = G.currentStep(g);
-    const items = G.triggersForStep(g, db, step.id, 0);
-    html += `<div class="steps">${STEPS.map((s, i) => `<span class="${i < g.stepIdx ? "done" : i === g.stepIdx ? "now" : ""}"></span>`).join("")}</div>
-      <div class="phase-label">${esc(step.phase)}</div>
-      <div class="step-title">${esc(step.es)}<small>${esc(step.en)}</small></div>
-      ${STEP_NOTES[step.id] ? `<p class="step-note">${esc(STEP_NOTES[step.id])}</p>` : ""}
-      ${items.length ? items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("") : `<div class="empty">Nada se dispara en este paso</div>`}
-      ${["main1", "main2"].includes(step.id) ? renderPlay() : ""}`;
+    // Todo tu turno en una sola lista, fase por fase
+    let phase = null;
+    for (const step of STEPS) {
+      if (step.phase !== phase) {
+        phase = step.phase;
+        html += `<h2 class="phase-head">${esc(phase)}</h2>`;
+      }
+      const items = G.triggersForStep(g, db, step.id, 0);
+      const isMain = ["main1", "main2"].includes(step.id);
+      const single = STEPS.filter((s) => s.phase === step.phase).length === 1;
+      html += `<section class="step-block">
+        ${single ? "" : `<div class="step-name">${esc(step.es)} <small>${esc(step.en)}</small></div>`}
+        ${STEP_NOTES[step.id] ? `<p class="step-note">${esc(STEP_NOTES[step.id])}</p>` : ""}
+        ${items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("")}
+        ${!items.length && !STEP_NOTES[step.id] && !isMain ? `<p class="step-note">Nada se dispara</p>` : ""}
+        ${isMain ? renderPlay() : ""}
+      </section>`;
+    }
   } else {
     let mine = "", others = "", othersCount = 0;
     for (const step of STEPS) {
@@ -156,7 +166,7 @@ function renderTurn() {
 }
 
 function renderPlay() {
-  return `<h2>Jugar</h2><div class="play">${PLAY_BUTTONS.map((b) => {
+  return `<div class="play">${PLAY_BUTTONS.map((b) => {
     const off = b.id === "land" && g.landPlayed;
     return `<button data-act="play" data-id="${b.id}" ${off ? "disabled" : ""}>${off ? "⛰️ Tierra ya jugada este turno" : b.label}</button>`;
   }).join("")}</div>`;

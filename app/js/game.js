@@ -12,7 +12,7 @@ export function parsed(card) {
 export function newGame({ opponents, names, starting }) {
   const players = [{ name: "Tú" }];
   for (let i = 1; i <= opponents; i++) players.push({ name: names?.[i] || `Oponente ${i}` });
-  return { players, turn: 1, active: starting, startingPlayer: starting, stepIdx: 0, perms: [], nextUid: 1, done: {} };
+  return { players, turn: 1, active: starting, startingPlayer: starting, perms: [], nextUid: 1, done: {} };
 }
 
 export function load() {
@@ -27,22 +27,15 @@ export function clear() {
 
 // --- Avance de turno ---------------------------------------------------------
 
-export function currentStep(g) {
-  return STEPS[g.stepIdx];
-}
-
-// En tu turno se avanza paso a paso; el turno de cada oponente es una sola pantalla.
+// Cada turno (tuyo o de un oponente) es una sola pantalla con todas sus fases.
 export function advance(g) {
   g.done = {};
-  if (g.active === 0 && g.stepIdx < STEPS.length - 1) { g.stepIdx++; return; }
-  g.stepIdx = 0;
   g.landPlayed = false;
   g.active = (g.active + 1) % g.players.length;
   if (g.active === g.startingPlayer) g.turn++;
 }
 
 export function nextLabel(g) {
-  if (g.active === 0 && g.stepIdx < STEPS.length - 1) return `Next: ${STEPS[g.stepIdx + 1].en}`;
   const next = (g.active + 1) % g.players.length;
   return next === 0 ? "Mi turno ▶" : `Turno de ${g.players[next].name} ▶`;
 }

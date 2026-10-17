@@ -50,13 +50,11 @@ header.top {
 main { flex: 1; padding: 16px 16px calc(96px + var(--safe-bottom)); }
 
 /* Pasos */
-.steps { display: flex; gap: 3px; margin-bottom: 14px; }
-.steps span { flex: 1; height: 5px; border-radius: 3px; background: var(--surface-2); }
-.steps span.done { background: #5b4a86; }
-.steps span.now { background: var(--accent); }
-.phase-label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; }
-.step-title { font-size: 26px; font-weight: 700; margin: 2px 0 2px; }
-.step-title small { font-size: 15px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+/* Lista del turno */
+h2.phase-head { color: var(--accent); margin-top: 26px; }
+.step-block { margin-bottom: 12px; }
+.step-name { font-weight: 700; font-size: 17px; margin: 0 0 6px; }
+.step-name small { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 4px; }
 .step-note { color: var(--muted); margin: 0 0 14px; }
 
 h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 22px 0 8px; }

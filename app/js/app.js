@@ -28,6 +28,14 @@ const EVENT_BUTTONS = [
   { type: "discard", label: "🗑️ Descartó", verb: "descartó" },
 ];
 
+// Botones de "Jugar" en las fases principales de tu turno.
+const PLAY_BUTTONS = [
+  { id: "land", label: "⛰️ Jugar tierra", title: "Jugar tierra", filter: (t) => /\bLand\b/.test(t) },
+  { id: "permanent", label: "🐉 Criatura o artefacto", title: "Lanzar criatura o artefacto", filter: (t) => /\b(Creature|Artifact)\b/.test(t) },
+  { id: "spell", label: "✨ Conjuro, encantamiento o instantáneo", title: "Lanzar conjuro, encantamiento o instantáneo", filter: (t) => /\b(Sorcery|Enchantment|Instant)\b/.test(t) },
+];
+const PERMANENT_TYPES = ["creature", "artifact", "enchantment", "planeswalker", "land", "battle"];
+
 const SPELL_TYPES = [
   { label: "Criatura", types: ["creature"] },
   { label: "Instantáneo / Conjuro", types: ["instant", "sorcery"] },
@@ -51,11 +59,12 @@ function toast(msg) {
   setTimeout(() => t.remove(), 1800);
 }
 
-function search(q, limit = 30) {
+function search(q, limit = 30, filter = null) {
   const n = norm(q.trim());
   if (n.length < 2) return [];
   const starts = [], contains = [];
   for (const e of index) {
+    if (filter && !filter(e.card.t)) continue;
     if (e.key.startsWith(n)) starts.push(e.card);
     else if (contains.length < limit && e.key.includes(n)) contains.push(e.card);
     if (starts.length >= limit) break;
@@ -126,7 +135,8 @@ function renderTurn() {
       <div class="phase-label">${esc(step.phase)}</div>
       <div class="step-title">${esc(step.es)}<small>${esc(step.en)}</small></div>
       ${STEP_NOTES[step.id] ? `<p class="step-note">${esc(STEP_NOTES[step.id])}</p>` : ""}
-      ${items.length ? items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("") : `<div class="empty">Nada se dispara en este paso</div>`}`;
+      ${items.length ? items.map((it) => renderTrig(it, `${step.id}|${it.key}`)).join("") : `<div class="empty">Nada se dispara en este paso</div>`}
+      ${["main1", "main2"].includes(step.id) ? renderPlay() : ""}`;
   } else {
     let mine = "", others = "", othersCount = 0;
     for (const step of STEPS) {
@@ -143,6 +153,13 @@ function renderTurn() {
   }
   html += `<h2>¿Pasó algo?</h2><div class="events">${EVENT_BUTTONS.map((b, i) => `<button data-act="event" data-i="${i}">${b.label}</button>`).join("")}</div>`;
   return html;
+}
+
+function renderPlay() {
+  return `<h2>Jugar</h2><div class="play">${PLAY_BUTTONS.map((b) => {
+    const off = b.id === "land" && g.landPlayed;
+    return `<button data-act="play" data-id="${b.id}" ${off ? "disabled" : ""}>${off ? "⛰️ Tierra ya jugada este turno" : b.label}</button>`;
+  }).join("")}</div>`;
 }
 
 function permRow(p) {
@@ -169,7 +186,7 @@ function renderBoard() {
       </div>
       ${cmd.length ? `<div class="zone-label">Zona de mando</div>${cmd.map(permRow).join("")}` : ""}
       ${bf.length ? bf.map(permRow).join("") : `<div class="empty">Sin permanentes</div>`}
-      ${gy.length ? `<details><summary class="zone-label">Cementerio (${gy.length})</summary>${gy.map(permRow).join("")}</details>` : ""}
+      ${gy.length ? `<div class="zone-label">Cementerio (${gy.length})</div>${gy.map(permRow).join("")}` : ""}
       ${ex.length ? `<details><summary class="zone-label">Exilio (${ex.length})</summary>${ex.map(permRow).join("")}</details>` : ""}
     </section>`;
   }).join("");
@@ -271,6 +288,43 @@ function showSearchOnly(onPick) {
   openSheet(`<h3>Elegir carta</h3><input type="search" placeholder="Buscar por nombre…" data-input="search" autofocus><div class="results" id="results"></div>`);
 }
 
+function showPlay(id) {
+  const b = PLAY_BUTTONS.find((x) => x.id === id);
+  ui.sheet = { kind: "play", button: b, filter: b.filter };
+  openSheet(`<h3>${esc(b.title)}</h3>
+    <input type="search" placeholder="Buscar carta por nombre (en inglés)…" data-input="search" autofocus>
+    <div class="results" id="results"></div>`);
+}
+
+// Juega una carta tuya: disparos al lanzarla y, si es un permanente, al entrar.
+function playCard(button, card) {
+  const types = typesOf(card);
+  const reactions = [];
+  if (button.id === "land") {
+    g.landPlayed = true;
+  } else {
+    // Disparos "when you cast this spell" de la propia carta (todavía en la pila)
+    const ghost = { uid: -1, name: card.n, controller: 0, zone: "stack", qty: 1 };
+    for (const trig of G.parsed(card).triggers) {
+      if (trig.kind === "event" && trig.self && trig.events.includes("cast")) {
+        reactions.push({ key: `cast-self:${trig.id}`, perm: ghost, trig, mine: true, owner: "Tú", times: 1, notes: [], cond: "Al lanzar" });
+      }
+    }
+    reactions.push(...G.triggersForEvent(g, db, { type: "cast", actor: 0, types }, { cond: "Al lanzar" }));
+  }
+  if (types.some((t) => PERMANENT_TYPES.includes(t))) {
+    const p = G.addPerm(g, card, 0, "battlefield");
+    reactions.push(...G.enterReactions(g, db, p).map((it) => ({ ...it, cond: it.cond || "Al entrar", key: `etb|${it.key}` })));
+  } else {
+    // Instantáneos y conjuros terminan en el cementerio
+    G.addPerm(g, card, 0, "graveyard");
+  }
+  closeSheet();
+  persist();
+  render();
+  showReactions(button.id === "land" ? `Jugaste ${card.n}` : `Lanzaste ${card.n}`, reactions);
+}
+
 function showEvent(i) {
   const b = EVENT_BUTTONS[i];
   ui.sheet = { kind: "event", button: b };
@@ -307,6 +361,7 @@ const actions = {
   },
   pick: (el) => {
     const card = db.get(el.dataset.name);
+    if (ui.sheet?.kind === "play") return playCard(ui.sheet.button, card);
     if (ui.sheet?.kind === "pick") { const cb = ui.sheet.onPick; closeSheet(); cb(card); return; }
     const { player, zone } = ui.sheet;
     const p = G.addPerm(g, card, player, zone);
@@ -339,6 +394,7 @@ const actions = {
     afterMove(reactions, `${p.name} ${label}`);
   },
   event: (el) => showEvent(Number(el.dataset.i)),
+  play: (el) => { if (!el.disabled) showPlay(el.dataset.id); },
   "event-who": (el) => {
     const b = ui.sheet.button;
     const actor = Number(el.dataset.p);
@@ -389,7 +445,7 @@ document.addEventListener("change", (e) => {
 document.addEventListener("input", (e) => {
   if (e.target.dataset.input !== "search") return;
   const box = document.getElementById("results");
-  const found = search(e.target.value);
+  const found = search(e.target.value, 30, ui.sheet?.filter);
   box.innerHTML = found.map((c) => `<button class="result" data-act="pick" data-name="${esc(c.n)}">${esc(c.n)}<small>${esc(c.t)}</small></button>`).join("")
     || (e.target.value.trim().length >= 2 ? `<div class="empty">Sin resultados</div>` : "");
 });

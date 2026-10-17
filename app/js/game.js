@@ -36,6 +36,7 @@ export function advance(g) {
   g.done = {};
   if (g.active === 0 && g.stepIdx < STEPS.length - 1) { g.stepIdx++; return; }
   g.stepIdx = 0;
+  g.landPlayed = false;
   g.active = (g.active + 1) % g.players.length;
   if (g.active === g.startingPlayer) g.turn++;
 }

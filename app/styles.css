@@ -98,6 +98,15 @@ details.others summary { color: var(--muted); padding: 8px 0; }
 }
 .events button:active, .chip:active { background: var(--surface-2); }
 
+/* Jugar cartas (fases principales) */
+.play { display: grid; gap: 8px; }
+.play button {
+  background: var(--surface-2); border: 1px solid var(--accent); border-radius: 12px;
+  padding: 14px 12px; text-align: left; font-size: 16px; font-weight: 600;
+}
+.play button:active { background: var(--border); }
+.play button:disabled { border-color: var(--border); color: var(--muted); font-weight: 400; background: var(--surface); }
+
 /* Barra inferior */
 .bottom-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;

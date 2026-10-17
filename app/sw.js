@@ -1,6 +1,6 @@
 // Service worker: guarda la app y la base de cartas para usarla sin conexión.
 // Cambia VERSION cada vez que publiques una versión nueva.
-const VERSION = "ca-v1";
+const VERSION = "ca-v2";
 const IMAGES = "ca-img-v1";
 const SHELL = [
   "./",
